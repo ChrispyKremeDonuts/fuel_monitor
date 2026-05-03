@@ -42,3 +42,15 @@ class TankVolume(models.Model):
         return f"Tank {self.tank_id} @ {self.created_at}: {self.volume}"
 
 
+class DailyTankSale(models.Model):
+    tank = models.ForeignKey(Tank, on_delete=models.CASCADE, related_name='daily_sales')
+    date = models.DateField()
+    total_sale = models.DecimalField(max_digits=10, decimal_places=2)
+
+    class Meta:
+        ordering = ['date']
+        constraints = [
+            models.UniqueConstraint(fields=['tank', 'date'], name='unique_tank_date'),
+        ]
+
+

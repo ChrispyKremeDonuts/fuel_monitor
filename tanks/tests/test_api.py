@@ -1,5 +1,6 @@
 import pytest
 from datetime import date
+from decimal import Decimal
 from rest_framework.test import APIClient
 from tanks.models import Location, Tank, DailyTankSale
 from .conftest import make_reading
@@ -197,6 +198,14 @@ def test_update_tank_volume(client, tank_a):
 
 
 @pytest.mark.django_db
+def test_update_tank_volume_tank_is_immutable(client, tank_a, tank_b):
+    reading = make_reading(tank_a, 50, "2023-01-02 10:00")
+    client.patch(f'/api/tank-volumes/{reading.id}/', {'tank': tank_b.id}, format='json')
+    reading.refresh_from_db()
+    assert reading.tank_id == tank_a.id
+
+
+@pytest.mark.django_db
 def test_delete_tank_volume(client, tank_a):
     reading = make_reading(tank_a, 50, "2023-01-02 10:00")
     response = client.delete(f'/api/tank-volumes/{reading.id}/')
@@ -273,6 +282,18 @@ def test_create_tank_volume_invalid_tank_returns_400(client):
         'created_at': '2023-01-02T10:00:00Z'
     }, format='json')
     assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_create_tank_volume_archived_tank_returns_400(client, tank_a):
+    client.delete(f'/api/tanks/{tank_a.id}/')
+    response = client.post('/api/tank-volumes/', {
+        'tank': tank_a.id,
+        'volume': '50.00',
+        'created_at': '2023-01-02T10:00:00Z'
+    }, format='json')
+    assert response.status_code == 400
+
 
 
 # ---------------------------------------------------------------------------
@@ -389,11 +410,79 @@ def test_running_average_nonexistent_tank_returns_404(client):
 
 
 @pytest.mark.django_db
+def test_running_average_archived_tank_returns_404(client, tank_a):
+    client.delete(f'/api/tanks/{tank_a.id}/')
+    response = client.get(f'/api/running-average/?tank_id={tank_a.id}&date=2023-01-02')
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
 def test_running_average_sunday(client, tank_a):
     """Sunday is the 7th day of the week — days_in_range should be 7."""
     response = client.get(f'/api/running-average/?tank_id={tank_a.id}&date=2023-01-08')
     assert response.status_code == 200
     assert response.data['week_start'] == '2023-01-02'
     assert response.data['running_average'] == '0.00'
+
+
+# ---------------------------------------------------------------------------
+# perform_update and perform_destroy propagate to DailyTankSale
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_update_tank_volume_recalculates_daily_sale(client, tank_a):
+    """PATCHing a reading's volume updates the DailyTankSale for that day."""
+    r1 = make_reading(tank_a, 50, "2023-01-02 10:00")
+    make_reading(tank_a, 30, "2023-01-02 11:00")
+    # sale is 20 (50→30)
+
+    client.patch(f'/api/tank-volumes/{r1.id}/', {'volume': '60.00'}, format='json')
+    # sale should now be 30 (60→30)
+
+    sale = DailyTankSale.objects.get(tank=tank_a, date=date(2023, 1, 2))
+    assert sale.total_sale == Decimal('30')
+
+
+@pytest.mark.django_db
+def test_update_cross_day_anchor_recalculates_next_day(client, tank_a):
+    """PATCHing the last reading of a day recalculates the following day's sale."""
+    anchor = make_reading(tank_a, 50, "2023-01-02 22:00")
+    make_reading(tank_a, 30, "2023-01-03 10:00")
+    # Jan 3 sale is 20 (anchor 50→30)
+
+    client.patch(f'/api/tank-volumes/{anchor.id}/', {'volume': '40.00'}, format='json')
+    # Jan 3 sale should now be 10 (40→30)
+
+    sale = DailyTankSale.objects.get(tank=tank_a, date=date(2023, 1, 3))
+    assert sale.total_sale == Decimal('10')
+
+
+@pytest.mark.django_db
+def test_archived_reading_excluded_from_running_average(client, tank_a):
+    """DELETing the first reading (anchor) recalculates that day's sale to 0."""
+    anchor = make_reading(tank_a, 50, "2023-01-02 10:00")
+    make_reading(tank_a, 30, "2023-01-02 11:00")
+    # sale is 20
+
+    client.delete(f'/api/tank-volumes/{anchor.id}/')
+    # anchor gone — only one reading left, no prior → sale = 0
+
+    response = client.get(f'/api/running-average/?tank_id={tank_a.id}&date=2023-01-02')
+    assert response.status_code == 200
+    assert response.data['running_average'] == '0.00'
+
+
+@pytest.mark.django_db
+def test_delete_cross_day_anchor_recalculates_next_day(client, tank_a):
+    """DELETing the last reading of a day recalculates the following day's sale."""
+    anchor = make_reading(tank_a, 50, "2023-01-02 22:00")
+    make_reading(tank_a, 30, "2023-01-03 10:00")
+    # Jan 3 sale is 20
+
+    client.delete(f'/api/tank-volumes/{anchor.id}/')
+    # anchor gone — Jan 3 first reading has no prior-day anchor → sale = 0
+
+    sale = DailyTankSale.objects.get(tank=tank_a, date=date(2023, 1, 3))
+    assert sale.total_sale == Decimal('0')
 
 

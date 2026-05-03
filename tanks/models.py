@@ -13,6 +13,12 @@ class Location(models.Model):
     def __str__(self):
         return self.name
 
+    def archive(self):
+        for tank in self.tanks.filter(is_archived=False):
+            tank.archive()
+        self.is_archived = True
+        self.save()
+
 
 class Tank(models.Model):
     name = models.CharField(max_length=255)
@@ -25,6 +31,11 @@ class Tank(models.Model):
     def __str__(self):
         return self.name
 
+    def archive(self):
+        self.volumes.update(is_archived=True)
+        self.is_archived = True
+        self.save()
+
 
 class TankVolume(models.Model):
     tank = models.ForeignKey(Tank, on_delete=models.CASCADE, related_name='volumes')
@@ -34,8 +45,11 @@ class TankVolume(models.Model):
 
     class Meta:
         ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['tank', 'created_at']),
+        ]
         constraints = [
-            models.CheckConstraint(check=Q(volume__gte=0), name='volume_non_negative')
+            models.CheckConstraint(check=Q(volume__gte=0), name='volume_non_negative'),
         ]
 
     def __str__(self):

@@ -1,7 +1,8 @@
 import pytest
 from datetime import date
 from decimal import Decimal
-from tanks.services import calculate_daily_total
+from tanks.models import DailyTankSale
+from tanks.services import calculate_daily_total, recalculate_affected_days
 from .conftest import make_reading
 
 
@@ -118,4 +119,14 @@ def test_multi_day_gap(tank_a):
     make_reading(tank_a, 40, "2023-01-04 10:00")
     total_jan4 = calculate_daily_total(tank_a, date(2023, 1, 4))
     assert total_jan4 == Decimal('0')
+
+
+@pytest.mark.django_db
+def test_recalculate_also_updates_next_day(tank_a):
+    """Changing the last reading of a day must also recalculate the following day."""
+    make_reading(tank_a, 50, "2023-01-02 22:00")
+    make_reading(tank_a, 30, "2023-01-03 10:00")
+    recalculate_affected_days(tank_a, date(2023, 1, 2))
+    jan3_sale = DailyTankSale.objects.get(tank=tank_a, date=date(2023, 1, 3))
+    assert jan3_sale.total_sale == Decimal('20')
 

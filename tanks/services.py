@@ -48,11 +48,15 @@ def calculate_daily_total(tank, target_date: date) -> Decimal:
 
 def recalculate_affected_days(tank, target_date: date) -> None:
     """
-    Recalculate and persist DailyTankSale for target_date.
+    Recalculate and persist DailyTankSale for target_date and target_date + 1.
+
+    The +1 day is needed because a modified reading might be the last reading of
+    the day, which is used as the cross-day anchor for the following day.
     """
-    total = calculate_daily_total(tank, target_date)
-    DailyTankSale.objects.update_or_create(
-        tank=tank,
-        date=target_date,
-        defaults={'total_sale': total}
-    )
+    for d in [target_date, target_date + timedelta(days=1)]:
+        total = calculate_daily_total(tank, d)
+        DailyTankSale.objects.update_or_create(
+            tank=tank,
+            date=d,
+            defaults={'total_sale': total}
+        )

@@ -19,10 +19,7 @@ class LocationViewSet(viewsets.ModelViewSet):
         return Location.objects.filter(is_archived=False)
 
     def perform_destroy(self, instance):
-        TankVolume.objects.filter(tank__location=instance).update(is_archived=True)
-        instance.tanks.update(is_archived=True)
-        instance.is_archived = True
-        instance.save()
+        instance.archive()
 
     @action(detail=True, methods=['get'], url_path='tanks')
     def tanks(self, request, pk=None):
@@ -39,9 +36,7 @@ class TankViewSet(viewsets.ModelViewSet):
         return Tank.objects.filter(is_archived=False)
 
     def perform_destroy(self, instance):
-        instance.volumes.update(is_archived=True)
-        instance.is_archived = True
-        instance.save()
+        instance.archive()
 
 
 class TankVolumeViewSet(viewsets.ModelViewSet):
@@ -61,6 +56,20 @@ class TankVolumeViewSet(viewsets.ModelViewSet):
         instance = serializer.save()
         recalculate_affected_days(instance.tank, instance.created_at.date())
 
+    def perform_update(self, serializer):
+        old_date = serializer.instance.created_at.date()
+        instance = serializer.save()
+        new_date = instance.created_at.date()
+        recalculate_affected_days(instance.tank, old_date)
+        if new_date != old_date:
+            recalculate_affected_days(instance.tank, new_date)
+
+    def perform_destroy(self, instance):
+        target_date = instance.created_at.date()
+        instance.is_archived = True
+        instance.save()
+        recalculate_affected_days(instance.tank, target_date)
+
 
 class RunningAverageView(APIView):
     def get(self, request):
@@ -75,7 +84,7 @@ class RunningAverageView(APIView):
         except ValueError:
             return Response({'error': 'tank_id must be a number'}, status=400)
 
-        if not Tank.objects.filter(id=tank_id).exists():
+        if not Tank.objects.filter(id=tank_id, is_archived=False).exists():
             return Response({'error': 'tank not found'}, status=404)
 
         try:

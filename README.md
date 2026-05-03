@@ -25,6 +25,18 @@ The API is available at `http://localhost:8000/api/`.
 
 ---
 
+## Sample data
+
+To seed the database with realistic data across two locations, three tanks, and a full week of readings:
+
+```bash
+docker-compose exec web python manage.py seed_data
+```
+
+The command prints the tank IDs and expected running average values to verify against.
+
+---
+
 ## Resetting the database
 
 To wipe all data and start fresh:
@@ -53,8 +65,15 @@ docker-compose exec web python manage.py migrate
 | GET/PATCH/DELETE | `/api/tanks/{id}/` | Retrieve / update / delete tank |
 | GET/POST | `/api/tank-volumes/` | List / create volume readings |
 | GET/PATCH/DELETE | `/api/tank-volumes/{id}/` | Retrieve / update / delete reading |
+| GET | `/api/running-average/` | Weekly running average for a tank |
 
 **Filtering on `/api/tank-volumes/`:**
 - `?tank_id=1` — readings for a specific tank
 - `?date=2023-01-02` — readings on a specific date
+
+**Params on `/api/running-average/`:**
+- `?tank_id=1` — (required) the tank to query
+- `?date=2023-01-02` — (required) the date to compute the average up to
+
+Returns the average daily sale from the Monday of the week containing `date` through `date` itself. For example, querying Wednesday returns `(Mon + Tue + Wed sales) / 3`.
 
